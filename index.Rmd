@@ -1,0 +1,241 @@
+---
+title: "Coursera predmachlearn-006 Course Project"
+author: "Mayukh Mukhopadhyay"
+date: "Sunday 26 October 2014"
+output: html_document
+---
+
+**Introduction**
+
+In this project, Human Activity Recongition (HAR) Data (<http://groupware.les.inf.puc-rio.br/har>) was used to predict activity from readings of sensors fitted on the belt, forearm, arm, and dumbbell of 6 participants. The sensors used were accelerometer, gyroscope, and magnetometer. For each location, readings of Euler angles (roll, pitch, and yaw) and raw sensor measurements in each of the 3 dimensions were taken. For each Euler angle measurement, 8 features (mean, variance, standard deviation, max, min, amplitude, kurtosis, and skewness) were derived. 
+
+**Exploring the data**
+
+The original HAR data consisted of 19622 observations of 160 variables. For 4 locations, 3 Euler angles per location, 1 total acceleration measurement and its variance per location, 3 sensors per location, 3 dimensional readings per sensor, and 8 derived measurements per Euler angle accounted for 4 x (3 + 1+1 + 3x3 + 8x3) = 152 features. Row number, user name, 3 timestamp measurements, 2 window measurements, and activity classe made up for the remaining 8 features. 
+
+All the derived variables (96+4) had missing data in them, hence were removed for analysis, reducing the features to 60. Further, features like row number (1), user name (1), timestamps (3), and window measurements (2) were assumed to be unrelated to the prediction problem. When the problem is to predict the type of activity from sensor readings, it should not matter which person has equipped the sensors or when the activity was performed. Hence these 7 features were removed. The final cleaned data therefore had 53 features. The first 52 columns contained predictor variables, and the 53rd column contained the outcome variable.
+
+Data normalization was not done, since the machine learning algorithm used was Random Forests which do not require centering or scaling of data. 
+
+For the structure of data after cleaning and the complete list of original features, refer Appendix at the end. 
+
+**Learning from data**
+
+The **Random Forest** algorithm **(R package: randomForest, function: randomForest)** was used to learn the parameters of the 52 predictor variables. Random Forests are very accurate (< 1% Out Of Bag Error Rate) without significant performance overhead, even if a high number of classification trees (~ 500) are used. However, they can be susceptible to overfitting, hence we partitioned the training data further into training and cross valication (CV) sets. 
+
+The algorithm was trained on the training set, then applied on the CV set to predict the outcomes. The predicted and actual outcomes of CV set were put in a contingency table (5x5 matrix, since there are 5 labels), from which the actual error rate was calculated. This was compared to the OOB estimate given by the trained object.
+
+The proportion by which the data were to be split into training and cv sets, and the number of classification trees to be used by the Random Forest algorithm were first learnt by running the algorithm with different values of them in a nested loop. The proportion was varied between 0.4 and 0.7, since anything more than 0.7 can overfit the data, and too few training samples may not learn the parameters well. The number of trees were varied between 200 and 500, because too few trees would give > 1 % OOB rate, and too many trees would slow down computation.
+
+```{r, eval=FALSE}
+fracs <- seq(0.4, 0.7, by=0.1)
+nts <- seq(200, 500, by=100)
+
+for (frac in fracs) {
+        for (nt in nts) {
+            inTrain <- createDataPartition(y=x$classe, p=frac, list=F)
+            xtrain <- x[inTrain, ]
+            xcv <- x[-inTrain, ]
+            
+            fit <- randomForest(classe ~ ., data=xtrain, ntree=nt)
+            ...
+        }
+}
+```
+
+The OOB estimate (training set) and actual error rate when the fit object was used to predict (CV set) was calculated for each iteration, and is plotted below. For the complete results table, refer Appendix.
+
+```{r, echo=FALSE}
+library(ggplot2)
+res <- read.csv("results.csv", header=T)
+ggplot(res) + geom_line(aes(x=1:dim(res)[1], y=oob_train), colour="red", size=2) + geom_line(aes(x=1:dim(res)[1], y=oob_cv), colour="blue", size=2) + labs(x="Iteration #", y="Error Rate (%): Training (Red), CV (Blue)", title="OOB Error Rates for Training and CV Sets by Iteration")
+```
+
+As expected, the error rates reduce with higher p and nTree. The lowest error rate for CV set occurs at p=0.7, ntree=300. But from the trend, it could be a one-off incident. Indeed, running the RandomForest algorithm with 70% training data revealed ~ 0.5% error rate on the remaining 30% data (CV set), when the randomForest fitted object was used to predict on that data. Ignoring this slump, we thus conclude that an OOB error rate of ~ 0.5% is what we expect, if we use 0.7 as the proportion of training data, and this rate is not improved by reducing the number of trees from default value of 500, set in the randomForest function. Hence we go ahead with p=0.7 and ntree=500 for our learning. 
+
+```{r, eval=FALSE}
+fit <- randomForest(classe ~ ., data=xtrain)
+```
+
+The trained 'fit' object thus obtained is
+
+```{r, eval=FALSE}
+Call:
+ randomForest(formula = classe ~ ., data = xtrain, ntree = nt) 
+               Type of random forest: classification
+                     Number of trees: 500
+No. of variables tried at each split: 7
+
+        OOB estimate of  error rate: 0.45%
+Confusion matrix:
+     A    B    C    D    E  class.error
+A 3903    1    1    0    1 0.0007680492
+B   10 2643    5    0    0 0.0056433409
+C    0   12 2382    2    0 0.0058430718
+D    0    0   22 2229    1 0.0102131439
+E    0    0    2    5 2518 0.0027722772
+```
+
+The expected out of sample error rate is the OOB estimate = 0.45%. This value can be calculated using the confusion matrix, by taking the first 5 rows and columns, summing up the diagonals, dividing by the sum of all values in 5x5 matrix, and finally subtracting from 1. This gives us:
+
+```{r}
+1 - 13675/13737
+```
+
+Hence, if we use this fit object on unseen data, then we expect the error rate to be 0.0045134 = 0.45%. Using this fit object, we predict the outcome in CV set. Below is the contingency table of the predicted outcomes (rows) with the actual labels (columns) in CV set.
+
+```{r, eval=FALSE}
+pred    A    B    C    D    E
+   A 1673   11    0    0    0
+   B    1 1124    8    0    0
+   C    0    3 1018    6    0
+   D    0    0    0  956    1
+   E    0    0    0    3 1081
+```
+
+The OOB error rate for CV set can be calculated from the above table in the same way that we did for the confusion matrix. 
+
+```{r}
+1 - 5852/5885
+```
+
+Thus, we get roughly the same error rate (0.005607477 = 0.56%) for CV set as we had obtained earlier while conducting the iterations. This is however, larger than our expected error rate of 0.45%, but nonetheless, is not too far off. The analyses are paired by using the same seed for random number generator.
+
+**Predicting the Test Set**
+
+Finally, we use this fit object on the test set to predict the outcomes. The test set consists of 20 observations, and the corresponding 20 labels are submitted in the other part of the assignment (automated grader). 
+
+**Note:** Due to Honor Code and subsequent iterations of the course, the complete R code is not shown in this document. Hence the code chunks are just R output. 
+
+**Appendix**
+
+Structure of dataset used in prediction problem (53 features):
+
+```{r, eval=FALSE}
+
+'data.frame':    19622 obs. of  53 variables:
+ $ roll_belt           : num  1.41 1.41 1.42 1.48 1.48 1.45 1.42 1.42 1.43 1.45 ...
+ $ pitch_belt          : num  8.07 8.07 8.07 8.05 8.07 8.06 8.09 8.13 8.16 8.17 ...
+ $ yaw_belt            : num  -94.4 -94.4 -94.4 -94.4 -94.4 -94.4 -94.4 -94.4 -94.4 -94.4 ...
+ $ total_accel_belt    : int  3 3 3 3 3 3 3 3 3 3 ...
+ $ gyros_belt_x        : num  0 0.02 0 0.02 0.02 0.02 0.02 0.02 0.02 0.03 ...
+ $ gyros_belt_y        : num  0 0 0 0 0.02 0 0 0 0 0 ...
+ $ gyros_belt_z        : num  -0.02 -0.02 -0.02 -0.03 -0.02 -0.02 -0.02 -0.02 -0.02 0 ...
+ $ accel_belt_x        : int  -21 -22 -20 -22 -21 -21 -22 -22 -20 -21 ...
+ $ accel_belt_y        : int  4 4 5 3 2 4 3 4 2 4 ...
+ $ accel_belt_z        : int  22 22 23 21 24 21 21 21 24 22 ...
+ $ magnet_belt_x       : int  -3 -7 -2 -6 -6 0 -4 -2 1 -3 ...
+ $ magnet_belt_y       : int  599 608 600 604 600 603 599 603 602 609 ...
+ $ magnet_belt_z       : int  -313 -311 -305 -310 -302 -312 -311 -313 -312 -308 ...
+ $ roll_arm            : num  -128 -128 -128 -128 -128 -128 -128 -128 -128 -128 ...
+ $ pitch_arm           : num  22.5 22.5 22.5 22.1 22.1 22 21.9 21.8 21.7 21.6 ...
+ $ yaw_arm             : num  -161 -161 -161 -161 -161 -161 -161 -161 -161 -161 ...
+ $ total_accel_arm     : int  34 34 34 34 34 34 34 34 34 34 ...
+ $ gyros_arm_x         : num  0 0.02 0.02 0.02 0 0.02 0 0.02 0.02 0.02 ...
+ $ gyros_arm_y         : num  0 -0.02 -0.02 -0.03 -0.03 -0.03 -0.03 -0.02 -0.03 -0.03 ...
+ $ gyros_arm_z         : num  -0.02 -0.02 -0.02 0.02 0 0 0 0 -0.02 -0.02 ...
+ $ accel_arm_x         : int  -288 -290 -289 -289 -289 -289 -289 -289 -288 -288 ...
+ $ accel_arm_y         : int  109 110 110 111 111 111 111 111 109 110 ...
+ $ accel_arm_z         : int  -123 -125 -126 -123 -123 -122 -125 -124 -122 -124 ...
+ $ magnet_arm_x        : int  -368 -369 -368 -372 -374 -369 -373 -372 -369 -376 ...
+ $ magnet_arm_y        : int  337 337 344 344 337 342 336 338 341 334 ...
+ $ magnet_arm_z        : int  516 513 513 512 506 513 509 510 518 516 ...
+ $ roll_dumbbell       : num  13.1 13.1 12.9 13.4 13.4 ...
+ $ pitch_dumbbell      : num  -70.5 -70.6 -70.3 -70.4 -70.4 ...
+ $ yaw_dumbbell        : num  -84.9 -84.7 -85.1 -84.9 -84.9 ...
+ $ total_accel_dumbbell: int  37 37 37 37 37 37 37 37 37 37 ...
+ $ gyros_dumbbell_x    : num  0 0 0 0 0 0 0 0 0 0 ...
+ $ gyros_dumbbell_y    : num  -0.02 -0.02 -0.02 -0.02 -0.02 -0.02 -0.02 -0.02 -0.02 -0.02 ...
+ $ gyros_dumbbell_z    : num  0 0 0 -0.02 0 0 0 0 0 0 ...
+ $ accel_dumbbell_x    : int  -234 -233 -232 -232 -233 -234 -232 -234 -232 -235 ...
+ $ accel_dumbbell_y    : int  47 47 46 48 48 48 47 46 47 48 ...
+ $ accel_dumbbell_z    : int  -271 -269 -270 -269 -270 -269 -270 -272 -269 -270 ...
+ $ magnet_dumbbell_x   : int  -559 -555 -561 -552 -554 -558 -551 -555 -549 -558 ...
+ $ magnet_dumbbell_y   : int  293 296 298 303 292 294 295 300 292 291 ...
+ $ magnet_dumbbell_z   : num  -65 -64 -63 -60 -68 -66 -70 -74 -65 -69 ...
+ $ roll_forearm        : num  28.4 28.3 28.3 28.1 28 27.9 27.9 27.8 27.7 27.7 ...
+ $ pitch_forearm       : num  -63.9 -63.9 -63.9 -63.9 -63.9 -63.9 -63.9 -63.8 -63.8 -63.8 ...
+ $ yaw_forearm         : num  -153 -153 -152 -152 -152 -152 -152 -152 -152 -152 ...
+ $ total_accel_forearm : int  36 36 36 36 36 36 36 36 36 36 ...
+ $ gyros_forearm_x     : num  0.03 0.02 0.03 0.02 0.02 0.02 0.02 0.02 0.03 0.02 ...
+ $ gyros_forearm_y     : num  0 0 -0.02 -0.02 0 -0.02 0 -0.02 0 0 ...
+ $ gyros_forearm_z     : num  -0.02 -0.02 0 0 -0.02 -0.03 -0.02 0 -0.02 -0.02 ...
+ $ accel_forearm_x     : int  192 192 196 189 189 193 195 193 193 190 ...
+ $ accel_forearm_y     : int  203 203 204 206 206 203 205 205 204 205 ...
+ $ accel_forearm_z     : int  -215 -216 -213 -214 -214 -215 -215 -213 -214 -215 ...
+ $ magnet_forearm_x    : int  -17 -18 -18 -16 -17 -9 -18 -9 -16 -22 ...
+ $ magnet_forearm_y    : num  654 661 658 658 655 660 659 660 653 656 ...
+ $ magnet_forearm_z    : num  476 473 469 469 473 478 470 474 476 473 ...
+ $ classe              : Factor w/ 5 levels "A","B","C","D",..: 1 1 1 1 1 1 1 1 1 1 ...
+
+```
+
+All 160 features:
+
+```{r, eval=FALSE}
+
+  [1] "X"                        "user_name"                "raw_timestamp_part_1"     "raw_timestamp_part_2"    
+  [5] "cvtd_timestamp"           "new_window"               "num_window"               "roll_belt"               
+  [9] "pitch_belt"               "yaw_belt"                 "total_accel_belt"         "kurtosis_roll_belt"      
+ [13] "kurtosis_picth_belt"      "kurtosis_yaw_belt"        "skewness_roll_belt"       "skewness_roll_belt.1"    
+ [17] "skewness_yaw_belt"        "max_roll_belt"            "max_picth_belt"           "max_yaw_belt"            
+ [21] "min_roll_belt"            "min_pitch_belt"           "min_yaw_belt"             "amplitude_roll_belt"     
+ [25] "amplitude_pitch_belt"     "amplitude_yaw_belt"       "var_total_accel_belt"     "avg_roll_belt"           
+ [29] "stddev_roll_belt"         "var_roll_belt"            "avg_pitch_belt"           "stddev_pitch_belt"       
+ [33] "var_pitch_belt"           "avg_yaw_belt"             "stddev_yaw_belt"          "var_yaw_belt"            
+ [37] "gyros_belt_x"             "gyros_belt_y"             "gyros_belt_z"             "accel_belt_x"            
+ [41] "accel_belt_y"             "accel_belt_z"             "magnet_belt_x"            "magnet_belt_y"           
+ [45] "magnet_belt_z"            "roll_arm"                 "pitch_arm"                "yaw_arm"                 
+ [49] "total_accel_arm"          "var_accel_arm"            "avg_roll_arm"             "stddev_roll_arm"         
+ [53] "var_roll_arm"             "avg_pitch_arm"            "stddev_pitch_arm"         "var_pitch_arm"           
+ [57] "avg_yaw_arm"              "stddev_yaw_arm"           "var_yaw_arm"              "gyros_arm_x"             
+ [61] "gyros_arm_y"              "gyros_arm_z"              "accel_arm_x"              "accel_arm_y"             
+ [65] "accel_arm_z"              "magnet_arm_x"             "magnet_arm_y"             "magnet_arm_z"            
+ [69] "kurtosis_roll_arm"        "kurtosis_picth_arm"       "kurtosis_yaw_arm"         "skewness_roll_arm"       
+ [73] "skewness_pitch_arm"       "skewness_yaw_arm"         "max_roll_arm"             "max_picth_arm"           
+ [77] "max_yaw_arm"              "min_roll_arm"             "min_pitch_arm"            "min_yaw_arm"             
+ [81] "amplitude_roll_arm"       "amplitude_pitch_arm"      "amplitude_yaw_arm"        "roll_dumbbell"           
+ [85] "pitch_dumbbell"           "yaw_dumbbell"             "kurtosis_roll_dumbbell"   "kurtosis_picth_dumbbell" 
+ [89] "kurtosis_yaw_dumbbell"    "skewness_roll_dumbbell"   "skewness_pitch_dumbbell"  "skewness_yaw_dumbbell"   
+ [93] "max_roll_dumbbell"        "max_picth_dumbbell"       "max_yaw_dumbbell"         "min_roll_dumbbell"       
+ [97] "min_pitch_dumbbell"       "min_yaw_dumbbell"         "amplitude_roll_dumbbell"  "amplitude_pitch_dumbbell"
+[101] "amplitude_yaw_dumbbell"   "total_accel_dumbbell"     "var_accel_dumbbell"       "avg_roll_dumbbell"       
+[105] "stddev_roll_dumbbell"     "var_roll_dumbbell"        "avg_pitch_dumbbell"       "stddev_pitch_dumbbell"   
+[109] "var_pitch_dumbbell"       "avg_yaw_dumbbell"         "stddev_yaw_dumbbell"      "var_yaw_dumbbell"        
+[113] "gyros_dumbbell_x"         "gyros_dumbbell_y"         "gyros_dumbbell_z"         "accel_dumbbell_x"        
+[117] "accel_dumbbell_y"         "accel_dumbbell_z"         "magnet_dumbbell_x"        "magnet_dumbbell_y"       
+[121] "magnet_dumbbell_z"        "roll_forearm"             "pitch_forearm"            "yaw_forearm"             
+[125] "kurtosis_roll_forearm"    "kurtosis_picth_forearm"   "kurtosis_yaw_forearm"     "skewness_roll_forearm"   
+[129] "skewness_pitch_forearm"   "skewness_yaw_forearm"     "max_roll_forearm"         "max_picth_forearm"       
+[133] "max_yaw_forearm"          "min_roll_forearm"         "min_pitch_forearm"        "min_yaw_forearm"         
+[137] "amplitude_roll_forearm"   "amplitude_pitch_forearm"  "amplitude_yaw_forearm"    "total_accel_forearm"     
+[141] "var_accel_forearm"        "avg_roll_forearm"         "stddev_roll_forearm"      "var_roll_forearm"        
+[145] "avg_pitch_forearm"        "stddev_pitch_forearm"     "var_pitch_forearm"        "avg_yaw_forearm"         
+[149] "stddev_yaw_forearm"       "var_yaw_forearm"          "gyros_forearm_x"          "gyros_forearm_y"         
+[153] "gyros_forearm_z"          "accel_forearm_x"          "accel_forearm_y"          "accel_forearm_z"         
+[157] "magnet_forearm_x"         "magnet_forearm_y"         "magnet_forearm_z"         "classe"   
+
+```
+
+Results of 16 iterations (p in [0.4..0.7], ntree in [200..500])
+
+```{r, eval=FALSE}
+   frac ntree oob_train    oob_cv
+1   0.4   200 1.2356688 1.2402311
+2   0.4   300 1.4140127 1.0873259
+3   0.4   400 1.1210191 1.2402311
+4   0.4   500 1.0573248 1.2232416
+5   0.5   200 0.9070526 0.9174312
+6   0.5   300 1.0293518 1.0703364
+7   0.5   400 0.7949450 0.7339450
+8   0.5   500 0.9783938 0.8970438
+9   0.6   200 0.5604144 0.6246017
+10  0.6   300 0.6198523 0.6755895
+11  0.6   400 0.6198523 0.6118547
+12  0.6   500 0.6623079 0.7138305
+13  0.7   200 0.5314115 0.4418012
+14  0.7   300 0.5605300 0.2888700
+15  0.7   400 0.5241319 0.4927782
+16  0.7   500 0.4513358 0.5607477
+
+```
