@@ -11,21 +11,21 @@ In this project, Human Activity Recongition (HAR) Data (<http://groupware.les.in
 
 **Exploring the data**
 
-The original HAR data consisted of 19622 observations of 160 variables. For 4 locations, 3 Euler angles per location, 1 total acceleration measurement and its variance per location, 3 sensors per location, 3 dimensional readings per sensor, and 8 derived measurements per Euler angle accounted for 4 x (3 + 1+1 + 3x3 + 8x3) = 152 features. Row number, user name, 3 timestamp measurements, 2 window measurements, and activity classe made up for the remaining 8 features. 
+The original HAR data consisted of 19622 observations of 160 variables. 4 locations, 3 Euler angles per location, 1 total acceleration measurement and its variance per location, 3 sensors per location, 3 dimensional readings per sensor, and 8 derived measurements per Euler angle accounted for 4 x (3 + 1+1 + 3x3 + 8x3) = 152 features. Row number, user name, 3 timestamp measurements, 2 window measurements, and activity classe were the remaining 8.
 
-All the derived variables (96+4) had missing data in them, hence were removed for analysis, reducing the features to 60. Further, features like row number (1), user name (1), timestamps (3), and window measurements (2) were assumed to be unrelated to the prediction problem. When the problem is to predict the type of activity from sensor readings, it should not matter which person has equipped the sensors or when the activity was performed. Hence these 7 features were removed. The final cleaned data therefore had 53 features. The first 52 columns contained predictor variables, and the 53rd column contained the outcome variable.
+All the derived variables (96+4) had missing data in them, hence removed from analysis, reducing the features to 60. Further, features like row number (1), user name (1), timestamps (3), and window measurements (2) were assumed to be unrelated to the prediction problem. When we want to predict the type of activity from sensor readings, it should not matter which person has equipped the sensors or when the activity was performed. Hence these 7 features were removed. The final cleaned data therefore had 53 features. The first 52 columns contained predictor variables, and the 53rd column contained the outcome variable.
 
-Data normalization was not done, since the machine learning algorithm used was Random Forests which do not require centering or scaling of data. 
+Data normalization was not done, since the machine learning algorithm used was Random Forests which do not require centering or scaling of data. Also, the performance of Random Forests on ~ 50 odd variables did not seem to be too slow, hence PCA or similar methods to reduce the features were not required.
 
-For the structure of data after cleaning and the complete list of original features, refer Appendix at the end. 
+For the structure of data after cleaning, and the complete list of original features, ref. Appendix at the end. 
 
 **Learning from data**
 
-The **Random Forest** algorithm **(R package: randomForest, function: randomForest)** was used to learn the parameters of the 52 predictor variables. Random Forests are very accurate (< 1% Out Of Bag Error Rate) without significant performance overhead, even if a high number of classification trees (~ 500) are used. However, they can be susceptible to overfitting, hence we partitioned the training data further into training and cross valication (CV) sets. 
+The **Random Forest** algorithm **(R package: randomForest, function: randomForest)** was used to learn the parameters of the 52 predictor variables. Random Forests are very accurate (< 1% Out Of Bag Error Rate) without significant performance overhead, even if a large number of features (~ 50) and classification trees (~ 500) are used. However, they can be susceptible to overfitting, hence we partitioned the training dataset further into training and cross valication (CV) sets. 
 
 The algorithm was trained on the training set, then applied on the CV set to predict the outcomes. The predicted and actual outcomes of CV set were put in a contingency table (5x5 matrix, since there are 5 labels), from which the actual error rate was calculated. This was compared to the OOB estimate given by the trained object.
 
-The proportion by which the data were to be split into training and cv sets, and the number of classification trees to be used by the Random Forest algorithm were first learnt by running the algorithm with different values of them in a nested loop. The proportion was varied between 0.4 and 0.7, since anything more than 0.7 can overfit the data, and too few training samples may not learn the parameters well. The number of trees were varied between 200 and 500, because too few trees would give > 1 % OOB rate, and too many trees would slow down computation.
+The proportion by which the data were to be split into training and cv sets, and the number of classification trees to be used by the Random Forest algorithm were first learnt by running the algorithm with different values of them in a nested loop. The proportion was varied between 0.4 and 0.7, since anything more than 0.7 can overfit the data, and too few training samples may not learn the parameters well. The number of trees were varied between 200 and 500, because too few trees would give > 1 % OOB rate, and too many trees would slow down computation. Also, changing the number of variables for each split (mtry) to 4 or 2 resulted in > 1% error rate.
 
 ```{r, eval=FALSE}
 fracs <- seq(0.4, 0.7, by=0.1)
@@ -51,7 +51,7 @@ res <- read.csv("results.csv", header=T)
 ggplot(res) + geom_line(aes(x=1:dim(res)[1], y=oob_train), colour="red", size=2) + geom_line(aes(x=1:dim(res)[1], y=oob_cv), colour="blue", size=2) + labs(x="Iteration #", y="Error Rate (%): Training (Red), CV (Blue)", title="OOB Error Rates for Training and CV Sets by Iteration")
 ```
 
-As expected, the error rates reduce with higher p and nTree. The lowest error rate for CV set occurs at p=0.7, ntree=300. But from the trend, it could be a one-off incident. Indeed, running the RandomForest algorithm with 70% training data revealed ~ 0.5% error rate on the remaining 30% data (CV set), when the randomForest fitted object was used to predict on that data. Ignoring this slump, we thus conclude that an OOB error rate of ~ 0.5% is what we expect, if we use 0.7 as the proportion of training data, and this rate is not improved by reducing the number of trees from default value of 500, set in the randomForest function. Hence we go ahead with p=0.7 and ntree=500 for our learning. 
+As expected, the error rates reduce with higher p and ntree. The lowest error rate for CV set occurs at p=0.7, ntree=300. But from the trend, it could be a one-off incident. Indeed, running the RandomForest algorithm with 70% training data and ntree=300 revealed ~ 0.6% error rate when the trained object was used to predict the remaining 30% data (CV set). We can thus ignore this slump, and conclude that an OOB error rate of ~ 0.5% is what we expect, if we use 0.7 as the proportion of training data, and this rate is not improved by reducing the number of trees from default=500 (set in the randomForest function), which is not computationally too slow either. Hence we go ahead with p=0.7 and ntree=default for learning. 
 
 ```{r, eval=FALSE}
 fit <- randomForest(classe ~ ., data=xtrain)
@@ -82,7 +82,7 @@ The expected out of sample error rate is the OOB estimate = 0.45%. This value ca
 1 - 13675/13737
 ```
 
-Hence, if we use this fit object on unseen data, then we expect the error rate to be 0.0045134 = 0.45%. Using this fit object, we predict the outcome in CV set. Below is the contingency table of the predicted outcomes (rows) with the actual labels (columns) in CV set.
+Hence, if we use this fit object on unseen data, then we expect the error rate to be 0.004513 = 0.45%. Using this fit object, we predict the outcome in CV set. Below is the contingency table of the predicted outcomes (rows) with the actual labels (columns) in CV set.
 
 ```{r, eval=FALSE}
 pred    A    B    C    D    E
@@ -99,7 +99,7 @@ The OOB error rate for CV set can be calculated from the above table in the same
 1 - 5852/5885
 ```
 
-Thus, we get roughly the same error rate (0.005607477 = 0.56%) for CV set as we had obtained earlier while conducting the iterations. This is however, larger than our expected error rate of 0.45%, but nonetheless, is not too far off. The analyses are paired by using the same seed for random number generator.
+Thus, we get roughly the same error rate (0.005607 = 0.56%) for CV set as we had obtained earlier while conducting the iterations. This is however, larger than our expected error rate of 0.45%, but nonetheless, is not too far off. The analyses are sync'ed by using the same seed for random number generator.
 
 **Predicting the Test Set**
 
